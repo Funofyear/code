@@ -1,0 +1,450 @@
+<?php
+
+	class OrdenesSalidaModel {
+    
+    public function retrieveByKeyword($q) {
+      $conex = DBConnection::getInstance();
+      
+      $conex->beginTransaction();
+      
+      try {
+        
+        $statementGetOrdenesSalida = $conex->prepare("
+          SELECT
+						os.UUID uuid,
+						os.FOLIO folio,
+						os.FECHA_CREACION fechaCreacion,
+                        ost.TIPO tipoOrdenSalida,
+                        AES_DECRYPT(u.Nombre, :DB_Key) creadoPor,
+						AES_DECRYPT(os.OBSERVACIONES, :DB_Key) observaciones
+					FROM OrdenesSalida os, Usuarios u, OrdenesSalida_Tipos ost, OrdenesSalida_Detalles osd, Productos p
+					WHERE os.CREADO_POR = u.ID
+                    AND os.TIPO = ost.ORDEN_SALIDA_TIPO_ID
+                    AND osd.ORDEN_SALIDA = os.ORDEN_SALIDA_ID
+                    AND osd.PRODUCTO = p.IDProducto
+                    AND UPPER(AES_DECRYPT(p.Nombre, :DB_Key)) LIKE UPPER(:Search_Query)
+                    ORDER BY os.FOLIO DESC");
+        
+        $statementGetOrdenesSalida->execute(array(':DB_Key' => 'Mult154b0r35', ':Search_Query' => '%'.$q.'%'));
+        
+        $ordenesSalidaResultSet = $statementGetOrdenesSalida->fetchAll(PDO::FETCH_ASSOC);
+        
+        $ordenesSalida = array(
+						"response" => $ordenesSalidaResultSet
+					);
+        
+        $conex->commit();
+
+
+				return $ordenesSalida;
+      } catch (PDOException $pdo_ex) {
+        $conex->rollback();
+				throw new PDOException($pdo_ex);
+			} catch (Exception $ex) {
+        $conex->rollback();
+        throw new Exception($ex);
+      }
+    }
+    
+    /**
+		retrieveAll()
+		Esta función obtiene todos los datos de todas las ordenes de salida de la base de datos
+		Verificada el 24/12/2015
+	*/
+	public function retrieveAll() {
+		try {
+			$conex = DBConnection::getInstance();
+        
+			// Beggining the transaction 
+			$conex->beginTransaction();
+
+			$Query_GetOrdenesSalida = "SELECT
+					os.UUID uuid,
+					os.FOLIO folio,
+					os.FECHA_CREACION fechaCreacion,
+					ost.TIPO tipoOrdenSalida,
+					AES_DECRYPT(u.Nombre, :DB_Key) creadoPor,
+					AES_DECRYPT(os.OBSERVACIONES, :DB_Key) observaciones,
+					IF(os.TIPO_MERMA IS NULL, 'NO APLICA', os.TIPO_MERMA) tipoMerma
+				FROM OrdenesSalida os, Usuarios u, OrdenesSalida_Tipos ost
+				WHERE os.CREADO_POR = u.ID
+				AND os.TIPO = ost.ORDEN_SALIDA_TIPO_ID
+				ORDER BY os.FOLIO DESC";
+			$Statement_GetOrdenesSalida = $conex->prepare($Query_GetOrdenesSalida);
+
+			$Statement_GetOrdenesSalida->execute(array(':DB_Key' => 'Mult154b0r35'));
+
+			$ordenesSalidaResultset = $Statement_GetOrdenesSalida->fetchAll(PDO::FETCH_ASSOC);
+
+			return $ordenesSalidaResultset;
+		} catch (PDOException $pdo_ex) {
+			throw new PDOException($pdo_ex);
+		} catch (Exception $ex) {
+			throw new Exception($ex);
+		}
+	}
+
+		/**
+			retrieveAll()
+			Esta función obtiene todos los datos de todas las ordenes de salida de la base de datos
+			Verificada el 24/12/2015
+		*/
+		public function retrieveByPage($lastSeen, $pageLength, $action) {
+			try {
+				$conex = DBConnection::getInstance();
+        
+                // Beggining the transaction 
+                $conex->beginTransaction();
+        
+                $Query_CountEntities = $conex->prepare("SELECT COUNT(*) total FROM OrdenesSalida WHERE FOLIO > :LastSeen");
+
+				$Query_CountEntities->execute(array(':LastSeen' => intval($lastSeen)));
+
+				$Entities = $Query_CountEntities->fetchAll(PDO::FETCH_ASSOC)[0]["total"];
+
+				$Query_GetOrdenesSalida = "SELECT
+						os.UUID uuid,
+						os.FOLIO folio,
+						os.FECHA_CREACION fechaCreacion,
+                        ost.TIPO tipoOrdenSalida,
+                        AES_DECRYPT(u.Nombre, :DB_Key) creadoPor,
+						AES_DECRYPT(os.OBSERVACIONES, :DB_Key) observaciones
+					FROM OrdenesSalida os, Usuarios u, OrdenesSalida_Tipos ost
+					WHERE os.CREADO_POR = u.ID
+                    AND os.TIPO = ost.ORDEN_SALIDA_TIPO_ID
+                    ORDER BY os.FOLIO DESC";
+				$Statement_GetOrdenesSalida = $conex->prepare($Query_GetOrdenesSalida);
+
+				$Statement_GetOrdenesSalida->execute(array(':DB_Key' => 'Mult154b0r35'));
+        
+                $ordenesSalidaResultset = $Statement_GetOrdenesSalida->fetchAll(PDO::FETCH_ASSOC);
+        
+                $ordenesSalida = array(
+						"quantity" => count($ordenesSalidaResultset),
+						"response" => $ordenesSalidaResultset,
+						"hasMore" => (($Entities - $pageLength) > 0) ? true : false,
+						"hasLess" => ($lastSeen > 0) ? true : false
+					);
+
+
+				return $ordenesSalida;
+			} catch (PDOException $pdo_ex) {
+				throw new PDOException($pdo_ex);
+			} catch (Exception $ex) {
+				throw new Exception($ex);
+			}
+		}
+
+		/**
+			retrieveByDate()
+			This function gets all the Outgoing orders by an specific date interval
+			Verificada el 24/12/2015
+		*/
+		public function retrieveByDate($starting_date, $ending_date) {
+			try {
+				$conex = DBConnection::getInstance();
+
+				$Query_GetOrdenesSalida = "SELECT
+												os.IDOrdenSalida,
+												AES_DECRYPT(p.Nombre, :DB_Key) as Producto,
+												AES_DECRYPT(u.Nombre, :DB_Key) as Unidades,
+												AES_DECRYPT(a.Nombre, :DB_Key) as Almacen,
+												os.Fecha,
+												os.Cantidad,
+												os.PrecioU,
+												AES_DECRYPT(os.Observaciones, :DB_Key) as Observaciones
+										   FROM OrdenesSalida as os, Productos as p, Unidades as u, Almacenes as a
+										   WHERE os.Producto = p.IDProducto
+										   AND p.Unidad = u.IDUnidad
+										   AND a.IDAlmacen = os.Almacen
+										   AND (os.Fecha BETWEEN :OrdenSalida_StartingDate AND :OrdenSalida_EndingDate)
+										   ORDER BY IDOrdenSalida";
+				$Statement_GetOrdenesSalida = $conex->prepare($Query_GetOrdenesSalida);
+
+				$Statement_GetOrdenesSalida->execute(array(
+											':OrdenSalida_StartingDate' => $starting_date,
+											':OrdenSalida_EndingDate' => $ending_date,
+											':DB_Key' => 'Mult154b0r35'
+					));
+
+				return $Statement_GetOrdenesSalida->fetchAll(PDO::FETCH_ASSOC);
+			} catch (PDOException $pdo_ex) {
+				throw new PDOException;
+			}
+		}
+
+		/**
+			readByID(int ID)
+			Esta función obtiene una orden de salida específica de la base de datos
+			Verificada el 24/12/2015
+		*/
+
+		public function readByID($uuid) {
+			try {
+				$conex = DBConnection::getInstance();
+
+				$Query_GetOrdenSalidaByID = "SELECT
+                        os.ORDEN_SALIDA_ID ordenSalidaId,
+						os.FOLIO folio,
+                        os.UUID uuid,
+                        ost.TIPO tipoOrdenSalida,
+						os.FECHA_CREACION fechaCreacion,
+                        AES_DECRYPT(u.Nombre, :DB_Key) creadoPor,
+						AES_DECRYPT(os.Observaciones, :DB_Key) observaciones,
+                        os.TIPO_MERMA tipoMerma,
+                        os.JUSTIFICACION_MERMA justificacionMerma
+					FROM OrdenesSalida os, Usuarios u, OrdenesSalida_Tipos ost
+					WHERE os.UUID = :OrdenSalida_ID
+                    AND u.ID = os.CREADO_POR
+					AND os.TIPO = ost.ORDEN_SALIDA_TIPO_ID";
+	   			$Statement_GetOrdenSalidaByID = $conex->prepare($Query_GetOrdenSalidaByID);
+
+	    		$Statement_GetOrdenSalidaByID->execute(array(':OrdenSalida_ID' => $uuid, ':DB_Key' => 'Mult154b0r35'));
+				$ordenSalidaEncabezado = $Statement_GetOrdenSalidaByID->fetchAll(PDO::FETCH_ASSOC)[0];
+        
+                $Query_GetOrdenEntradaDetalleByID = "SELECT
+                            osd.ID_ORDEN_SALIDA_DETALLE idOrdenSalidaDetalle,
+                            p.IDProducto,
+                            AES_DECRYPT(p.Codigo, :DB_Key) codigo,
+                            AES_DECRYPT(p.Nombre, :DB_Key) nombre,
+                            AES_DECRYPT(p.Descripcion, :DB_Key) descripcion,
+                            AES_DECRYPT(u.Nombre, :DB_Key) as unidades,
+                            AES_DECRYPT(p.Observaciones, :DB_Key) observaciones,
+                            osd.NUMERO_LINEA numeroLinea,
+                            osd.CANTIDAD cantidad,
+                            osd.EXISTENCIA existencia,
+                            AES_DECRYPT(oe.Lote, :DB_Key) lote,
+                            e.OrdenEntrada ordenEntrada,
+                            AES_DECRYPT(a.Nombre, :DB_Key) almacen,
+                            pre.NOMBRE presentacionNombre
+                        FROM OrdenesSalida_Detalles as osd, Productos as p, Unidades as u, Existencias e, Almacenes a, Presentaciones pre, OrdenesEntrada oe
+                        WHERE osd.PRODUCTO = p.IDProducto
+                        AND p.Unidad = u.IDUnidad
+                        AND osd.EXISTENCIA = e.IDExistencia
+                        AND e.Almacen = a.IDAlmacen
+                        AND oe.IDOrdenE = e.OrdenEntrada
+                        AND pre.PRESENTACION_ID = osd.PRESENTACION
+						            AND osd.ORDEN_SALIDA = :OrdenCompra_ID
+                        ORDER BY osd.NUMERO_LINEA";
+		   	    $Statement_GetOrdenEntradaDetalleByID = $conex->prepare($Query_GetOrdenEntradaDetalleByID);
+
+		    	$Statement_GetOrdenEntradaDetalleByID->execute(array(':OrdenCompra_ID' => $ordenSalidaEncabezado["ordenSalidaId"], ':DB_Key' => 'Mult154b0r35'));
+
+		    	$ordenCompraDetalles = $Statement_GetOrdenEntradaDetalleByID->fetchAll(PDO::FETCH_ASSOC);
+				$ordenCompraDetallesArr = array("detalles" => $ordenCompraDetalles);
+
+				$ordenCompra = array_merge($ordenSalidaEncabezado, $ordenCompraDetallesArr);
+	    		return $ordenCompra;
+			} catch (PDOException $pdo_ex) {
+				throw new PDOException($pdo_ex);
+			}
+		}
+
+		/**
+			save(Producto producto)
+			Esta función guarda un producto en la base de datos
+			Verificada el 26/12/2015
+		*/
+
+		public function save($ordenSalidaEncabezado, $ordenSalidaDetalles) {
+			try {
+			    $fechaCreacion = date_create($ordenSalidaEncabezado->getFechaCreacion());
+
+
+                // Getting the instance from the db connection
+                $conex = DBConnection::getInstance();
+                
+				// Beggining the transaction 
+                $conex->beginTransaction();
+        
+                // Getting the latest number from the numero field 
+                $statementGetLastNumero = $conex->prepare("SELECT (MAX(FOLIO) + 1) as nextNumero FROM OrdenesSalida");
+        
+                $statementGetLastNumero->execute();
+          
+                $nextNumero = $statementGetLastNumero->fetchAll(PDO::FETCH_ASSOC)[0]["nextNumero"];
+        
+                // Preparing the query to be executed
+				$Query_InsertNewOrdenSalida = "INSERT INTO OrdenesSalida (
+                        FOLIO, 
+                        TIPO,
+                        UUID, 
+                        FECHA_CREACION,
+                        CREADO_POR,
+                        OBSERVACIONES,
+                        TIPO_MERMA,
+                        JUSTIFICACION_MERMA
+                    ) VALUES (
+                        :OrdenSalida_Folio, 
+                        :OrdenSalida_Tipo,
+                        :OrdenSalida_UUID, 
+                        :OrdenSalida_FechaCreacion, 
+                        :OrdenSalida_CreadoPor,
+                        AES_ENCRYPT(:OrdenSalida_Observaciones, :DB_Key),
+                        :OrdenSalida_TipoMerma,
+                        :OrdenSalida_JustificacionMerma
+                )";
+        
+				$Statement_InsertNewOrdenSalida = $conex->prepare($Query_InsertNewOrdenSalida);
+        
+                // Executing the query to save the new orden de compra
+			    $Statement_InsertNewOrdenSalida->execute(array(
+                    ':OrdenSalida_Folio' => $nextNumero,
+                    ':OrdenSalida_Tipo' => $ordenSalidaEncabezado->getTipo(),
+                    ':OrdenSalida_UUID' => $ordenSalidaEncabezado->getUUID(),
+                    ':OrdenSalida_FechaCreacion' => date_format($fechaCreacion, "Y/m/d H:i:s"),
+                    ':OrdenSalida_CreadoPor' => $ordenSalidaEncabezado->getCreadoPor(),
+                    ':OrdenSalida_Observaciones' => $ordenSalidaEncabezado->getObservaciones(),
+                    ':OrdenSalida_TipoMerma' => $ordenSalidaEncabezado->getTipoMerma(),
+                    ':OrdenSalida_JustificacionMerma' => $ordenSalidaEncabezado->getJustificacionMerma(),
+                    ':DB_Key' => 'Mult154b0r35'
+				));
+        
+                // Getting the last inserted ID
+                $idOrdenSalida = $conex->lastInsertId();
+        
+                // Setting the variable which will be saving the line number
+                $lineNumber = 1;
+        
+                // Executing the queries to save the details 
+                foreach($ordenSalidaDetalles as $detalle) {
+                    $Query_InsertNewOrdenSalida = "INSERT INTO OrdenesSalida_Detalles (
+                        ORDEN_SALIDA, 
+                        NUMERO_LINEA,
+                        PRODUCTO, 
+                        EXISTENCIA, 
+                        CANTIDAD,
+                        PRESENTACION
+                    ) VALUES (
+                        :OrdenSalida_ID, 
+                        :OrdenSalida_NumeroLinea,
+                        :OrdenSalida_Producto, 
+                        :OrdenSalida_Existencia, 
+                        :OrdenSalida_Cantidad,
+                        :OrdenSalida_Presentacion
+                   )";
+                   $Statement_InsertNewOrdenSalida = $conex->prepare($Query_InsertNewOrdenSalida);
+
+                   $Statement_InsertNewOrdenSalida->execute(array(
+                        ':OrdenSalida_ID' => $idOrdenSalida,
+                        ':OrdenSalida_NumeroLinea' => $lineNumber,
+                        ':OrdenSalida_Producto' => $detalle->getProducto(),
+                        ':OrdenSalida_Existencia' => $detalle->getExistencia(),
+                        ':OrdenSalida_Cantidad' => $detalle->getCantidad(),
+                        ':OrdenSalida_Presentacion' => $detalle->getPresentacion()
+                   ));
+
+                   // Modifying the locked existencias
+                   $Query_UpdateLockedExistencias = "UPDATE Existencias 
+                        SET Existencias = Existencias - (:Existencia_Salida * :Existencia_PresentacionCantidad) 
+                        WHERE IDExistencia = :Existencia_ID
+                   ";
+
+                   $Statement_UpdateLockedExistencias = $conex->prepare($Query_UpdateLockedExistencias);
+
+                   $Statement_UpdateLockedExistencias->execute(array(
+                     ':Existencia_Salida' => $detalle->getCantidad(), 
+                     ':Existencia_PresentacionCantidad' => $detalle->getPresentacionCantidad(),
+                     ':Existencia_ID' => $detalle->getExistencia()
+                   ));
+
+                   $lineNumber++;
+                }
+
+				// Commiting the transaction 
+                $conex->commit();
+			} catch (PDOException $pdo_ex) {
+                $conex->rollback();
+				throw new PDOException($pdo_ex);
+			} catch (Exception $ex) {
+                $conex->rollback();
+                throw new Exception($ex);
+            }
+        }
+
+		/**
+			update(Producto producto)
+			Esta función guarda un producto en la base de datos
+			Verificada el 26/12/2015
+		*/
+
+		public function update($OrdenSalida, $ExistenciaID) {
+			try {
+				$conex = DBConnection::getInstance();
+
+				$conex->beginTransaction();
+
+				//Updating the entry order
+				$Query_UpdateOrdenSalida = "UPDATE OrdenesSalida
+											SET Producto = :OrdenSalida_Producto, Cliente = :OrdenSalida_Cliente, Existencia = :OrdenSalida_Existencia, Fecha = :OrdenSalida_Fecha, Almacen = :OrdenSalida_Almacen,
+											Cantidad = :OrdenSalida_Cantidad, PrecioU = :OrdenSalida_PrecioUnitario, PrecioLinea = :OrdenSalida_PrecioLinea,
+											Observaciones = AES_ENCRYPT(:OrdenSalida_Observaciones, :DB_Key)
+											WHERE IDOrdenSalida = :OrdenSalida_ID";
+				$Statement_UpdateOrdenSalida = $conex->prepare($Query_UpdateOrdenSalida);
+
+				$Statement_UpdateOrdenSalida->execute(array(
+						':OrdenSalida_Producto' => $OrdenSalida->getProducto(),
+						':OrdenSalida_Cliente' => $OrdenSalida->getCliente(),
+						':OrdenSalida_Existencia' => $ExistenciaID,
+						':OrdenSalida_Fecha' => $OrdenSalida->getFecha(),
+						':OrdenSalida_Almacen' => $OrdenSalida->getAlmacen(),
+						':OrdenSalida_Cantidad' => $OrdenSalida->getCantidad(),
+						':OrdenSalida_PrecioUnitario' => $OrdenSalida->getPrecioU(),
+						':OrdenSalida_PrecioLinea' => $OrdenSalida->getPrecioLinea(),
+						':OrdenSalida_Observaciones' => $OrdenSalida->getObservaciones(),
+						':OrdenSalida_ID' => $OrdenSalida->getID(),
+						':DB_Key' => 'Mult154b0r35'
+					));
+					//Getting the existence info
+					$Statement_GetExistencia = $conex->prepare("SELECT Existencias FROM Existencias WHERE IDExistencia = :Existencia_ID");
+
+					$Statement_GetExistencia->execute(array(':Existencia_ID' => $ExistenciaID));
+
+					$ExistenciaInfo = $Statement_GetExistencia->fetchAll(PDO::FETCH_ASSOC)[0];
+
+					$NewCantidad = $ExistenciaInfo["Existencias"] - $OrdenSalida->getCantidad();
+
+					//updating the existence
+					$Statement_UpdateExistence = $conex->prepare("UPDATE Existencias SET Existencias = :Existencias_Existencias WHERE IDExistencia = :Existencia_ID");
+
+					$Statement_UpdateExistence->execute(array(
+						':Existencias_Existencias' => $NewCantidad,
+						':Existencia_ID' => $ExistenciaID
+					));
+
+					$conex->commit();
+				return true;
+			} catch (PDOException $pdo_ex) {
+				$conex->rollback();
+				throw new PDOException($pdo_ex);
+			} catch (Exception $ex) {
+				$conex->rollback();
+				throw new Exception($ex);
+			}
+		}
+
+		/**
+			save(Producto producto)
+			Esta función guarda un producto en la base de datos
+			Verificada el 26/12/2015
+		*/
+
+		public function delete($ID) {
+			try {
+				$conex = DBConnection::getInstance();
+
+				$Query_DeleteOrdenEntrada = "DELETE FROM OrdenesSalida
+							   				WHERE IDOrdenSalida = :OrdenSalida_ID";
+				$Statement_DeleteOrdenEntrada = $conex->prepare($Query_DeleteOrdenEntrada);
+
+				$Statement_DeleteOrdenEntrada->execute(array(
+					':OrdenSalida_ID' => $ID
+				));
+				return true;
+			} catch (PDOException $pdo_ex) {
+				throw new PDOException($pdo_ex);
+			}
+		}
+	}
+
+?>
