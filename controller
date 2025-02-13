@@ -1,0 +1,371 @@
+angular.module('Telesist')
+.controller('newOutgoingOrderCtrl', ['$scope', '$http', '$filter', '$window', 'apiService', '$rootScope', function ($scope, $http, $filter, $window, $apiService, $rootScope) {
+
+	// Creating the global scope
+	$scope.ordenSalidaEncabezado = {};
+	$scope.ordenSalidaEncabezado.fechaCreacion = new Date();
+    $scope.ordenSalidaDetalles = [];
+    $scope.ordenSalidaDetalle = {};
+
+	// Global variables
+	$scope.productos = [];
+	$scope.existencias = [];
+    $scope.ordenSalidaTipos = [];
+    $scope.ordenSalidaTiposMerma = [];
+	$scope.producto = {};
+	$scope.existencia = {};
+
+	//Creating the variable where the info is captured
+	$scope.queryProducto = "";
+	
+	
+    // Setting the flags
+    $scope.flags = {
+        callingWebService: false,
+        isMermaOrder: false,
+        isProductoSelected: false,
+        isExistenciaSelected: false
+    }
+  
+    // Setting the creator of the order
+    $scope.ordenSalidaEncabezado.creadoPor = $rootScope.userMetadata.id;
+  
+	$apiService.getOrdenesSalidaTipos()
+    .then(function (response) {
+
+        if (Array.isArray(response) && response.length > 0) {
+            $scope.ordenSalidaTipos = response;
+
+            let salidaInterna = response.find(tipo => tipo.nombre.toUpperCase() === 'SALIDA INTERNA');
+            let merma = response.find(tipo => tipo.nombre.toUpperCase() === 'MERMA');
+            let ordenPedido = response.find(tipo => tipo.nombre.toUpperCase() === 'FOLIO ORDEN PEDIDO');
+
+            $scope.salidaInternaTipoId = salidaInterna ? salidaInterna.tipoId : null;
+            $scope.mermaTipoId = merma ? merma.tipoId : null;
+            $scope.ordenPedidoTipoId = ordenPedido ? ordenPedido.tipoId : null;
+
+        } else {
+            console.warn("La API no devolvió datos válidos o está vacía.");
+            $scope.ordenSalidaTipos = [];
+        }
+    })
+    .catch(function (error) {
+        console.error("Error al obtener los tipos de orden de salida:", error);
+        swal("Ha ocurrido un problema", error.response?.message || "Error desconocido", "error");
+    });
+
+    $apiService.getOrdenesSalidaTiposMerma()
+    .then(function (response) {
+        $scope.ordenSalidaTiposMerma = response;
+    }, function (reason) {
+        swal("Ha ocurrido un problema", reason.response.message, "error");
+    });
+
+    $scope.validateOrdenSalidaType = function () {
+		const tipoSeleccionado = $scope.ordenSalidaEncabezado.tipo;
+	
+		$scope.isOrdenPedido = tipoSeleccionado === $scope.ordenPedidoTipoId;
+		$scope.isMerma = tipoSeleccionado === $scope.mermaTipoId;
+	
+		if (!$scope.isOrdenPedido) {
+			$scope.ordenPedidoFolio = null;
+			$scope.mensajeFolioPedido = null;
+		}
+	
+		if ($scope.isOrdenPedido && !$scope.ordenPedidoFolio && $scope.isFolioTouched) {
+			$scope.mensajeFolioPedido = "Ingresa un folio antes de buscar la orden de pedido";
+		} else {
+			$scope.mensajeFolioPedido = null;
+		}
+	
+		if ($scope.isOrdenPedido && $scope.ordenPedidoFolio) {
+			$apiService.getOrdenesPedidosByQuery($scope.ordenPedidoFolio)
+				.then(function (response) {
+					const ordenPedido = response.response;
+					const existeFolio = ordenPedido.some(orden => orden.folio === $scope.ordenPedidoFolio);
+	
+					if (!existeFolio) {
+						swal("Error", "El folio ingresado no coincide con ninguna orden de pedido", "error");
+						$scope.ordenPedidoFolio = null;
+						$scope.mensajeFolioPedido = "Folio no encontrado. Ingresa un folio válido.";
+					} else {
+						$scope.mensajeFolioPedido = "¡Folio encontrado exitosamente!";
+					}
+				})
+				.catch(function (reason) {
+					swal("Ha ocurrido un problema", "Error al buscar las órdenes de pedido", "error");
+				});
+		}
+	};
+	
+	$scope.onFolioTouched = function() {
+		$scope.isFolioTouched = true;
+	};
+	
+
+	
+    
+  $scope.buscarCodigoBarras = function() {
+    var codigoBarras = $scope.codigoBarras;
+    var codigoBarrasHyphen = codigoBarras.replace("'", "-");
+    $apiService.getExistenciaByCodigoBarras(codigoBarrasHyphen)
+    .then(function (response) {
+      console.log(response);
+      $scope.ordenSalidaDetalle.producto = response.producto;
+      $scope.ordenSalidaDetalle.existencia = response.existencia;
+      
+      $scope.flags.isProductoSelected = true;
+      $scope.flags.isExistenciaSelected = true;
+    }, function (reason) {
+      swal("Ha ocurrido un problema", "Hubo problemas al obtener la información del código de barras.", "error");
+    });
+  }
+  
+
+	/*Downloading all the items from the API*/
+	$scope.getProductos = function () {
+		//Calling the api to get the p`roveedores by query
+		$apiService.getProductosByQuery($scope.queryProducto)
+		.then(function (response) {
+			$scope.productos = response.response;
+		}, function (reason) {
+			swal("Ha ocurrido un problema", "Hubo problemas al buscar los productos", "error");
+		});
+	}
+
+	$scope.selectProducto = function (idProducto) {
+		$scope.ordenSalidaDetalle.producto = $filter('filter')($scope.productos, {IDProducto: idProducto}, true)[0];
+        
+        // Setting the flag of product selected to true
+        $scope.flags.isProductoSelected = true;
+	}
+
+	/*Downloading all the items from the API*/
+	$scope.getExistencias = function () {
+		$apiService.getExistenciasProducto($scope.ordenSalidaDetalle.producto.uuid)
+		.then(function (response) {
+			$scope.existencias = response.response;
+		}, function (reason) {
+			swal("Ha ocurrido un problema", "Hubo problemas al buscar las existencias", "error");
+		});
+	}
+
+	$scope.selectExistencia = (function (idExistencia) {
+		$scope.ordenSalidaDetalle.existencia = $filter('filter')($scope.existencias, {IDExistencia: $scope.ordenSalidaDetalle.existencia}, true)[0];
+        
+        // Setting the flag of product selected to true
+        $scope.flags.isExistenciaSelected = true;
+	});
+  
+  	// Functions to 
+  	$scope.eliminarDetalle = function (index) {
+		// Deleting the element from the array
+		$scope.ordenSalidaDetalles.splice(index, 1);
+	}
+  
+  $scope.agregarDetalle = (function () {
+    	// Checking if the quantity is more than the existents
+    	if($scope.ordenSalidaDetalle.cantidad <= parseFloat($scope.ordenSalidaDetalle.existencia.disponibles) && $scope.ordenSalidaDetalle.cantidad != undefined) {
+			// Pushing infomration and doing operations
+			$scope.ordenSalidaDetalles.push($scope.ordenSalidaDetalle);
+
+			// cleaning up information
+			$scope.producto = {};
+			$scope.existencia = {};
+			$scope.ordenSalidaDetalle = {};
+
+			$scope.flags.isExistenciaSelected = false;
+			$scope.flags.isProductoSelected = false;
+    	}
+	});
+
+	$scope.createOrdenSalida = (function (){
+		$scope.ordenSalidaEncabezado.detalles = $scope.ordenSalidaDetalles;
+
+		$apiService.createNewOrdenSalida($scope.ordenSalidaEncabezado)
+		.then(function (response) {
+			swal({
+				title: "Listo",
+				text: "La orden de salida se ha guardado con éxito",
+				type: "success"
+			}, function () {
+				$window.location.href = "#/movimientos/ordenes_salida/administrar/";
+			});
+		}, function (reason) {
+			swal("Ha ocurrido un problema", "La orden de salida no se ha agregado. Quizá el servidor tenga un problema", "error");
+		});
+	});
+}])
+
+.controller('modifyOutgoingOrderCtrl', ['$scope', '$http', '$filter', '$location', '$window', function ($scope, $http, $filter, $location, $window) {
+	var mb = angular.element(document.querySelector(".modal-backdrop"));
+	var mo = angular.element(document.querySelector(".modal-open"));
+
+	mo.removeClass();
+	mb.remove();
+
+	var idOrdenSalida = $location.search().orden_salida;
+
+	var api_dir = "http://multisabores.telesist.com.mx/api/";
+
+	$scope.OrdenSalida = {};
+
+	/*Variables globales*/
+
+	$scope.productos = [];
+	$scope.existencias = [];
+	$scope.producto = {};
+	$scope.existencia = {};
+
+	$http.get(api_dir + "ordenes-salida/" + idOrdenSalida)
+	.then(function (value) {
+		$scope.OrdenSalida = value.data.response[0];
+
+		$scope.OrdenSalida.Producto = $scope.OrdenSalida.Producto_ID;
+		$scope.OrdenSalida.Almacen = $scope.OrdenSalida.Almacen_ID;
+		$scope.OrdenSalida.Fecha = new Date($scope.OrdenSalida.Fecha);
+		$scope.OrdenSalida.IDOrdenSalida = parseInt($scope.OrdenSalida.IDOrdenSalida);
+		$scope.OrdenSalida.Cantidad = parseFloat($scope.OrdenSalida.Cantidad);
+
+		delete $scope.OrdenSalida.Producto_Codigo;
+		delete $scope.OrdenSalida.Producto_Nombre;
+		delete $scope.OrdenSalida.Producto_Descripcion;
+		delete $scope.OrdenSalida.Producto_Marca;
+		delete $scope.OrdenSalida.Producto_CertificacionK;
+		delete $scope.OrdenSalida.Producto_CertificacionC;
+		delete $scope.OrdenSalida.Producto_Unidades;
+		delete $scope.OrdenSalida.Producto_Observaciones;
+
+		/*Now, we need to get the existences from the actual item*/
+		$http.get(api_dir + "productos/" + $scope.OrdenSalida.Producto + "/existencias")
+		.then(function (value) {
+			$scope.existencias = value.data;
+			$scope.existencia = $filter('filter')($scope.existencias, {Almacen: $scope.OrdenSalida.Almacen}, true)[0];
+		}, function (reason) {
+			alert("Hubo un problema al obtener las existencias. Por: " + reason);
+		});
+
+	}, function (reason) {
+		alert("Ha habido un problema al obtener la orden de salida");
+	});
+
+	/*Getting all the products*/
+	$http.get(api_dir + "productos/")
+	.then(function (value) {
+		$scope.productos = value.data.response;
+		$scope.producto = $filter('filter')($scope.productos, {IDProducto: $scope.OrdenSalida.Producto}, true)[0];
+	}, function (reason) {
+		alert("Hubo un problema al obtener los productos. Por: " + reason);
+	});
+
+	$scope.selectProducto = (function (idProducto) {
+		$scope.producto = $filter('filter')($scope.productos, {IDProducto: $scope.OrdenSalida.Producto}, true)[0];
+	});
+
+	$scope.selectExistencia = (function (idExistencia) {
+		$scope.existencia = $filter('filter')($scope.existencias, {IDExistencia: $scope.OrdenSalida.Existencia}, true)[0];
+		$scope.OrdenSalida.Almacen = $scope.existencia.Almacen;
+	});
+
+	$scope.modifyOutgoingOrder = (function () {
+		$http.put(api_dir + "ordenes-salida/" + idOrdenSalida, $scope.OrdenSalida, {headers: {'Content-Type' : 'application/json'}})
+		.then(function (value) {
+			swal({
+				title: "Listo",
+				text: "La orden de salida se ha modificado con éxito",
+				type: "success"
+			}, function () {
+				$window.location.href = "#/movimientos/ordenes_salida/administrar";
+			});
+		}, function (reason) {
+			swal("Ha ocurrido un problema", "La orden de entrada no se ha agregado. Motivo: " + reason, "error");
+		});
+	});
+}])
+
+.controller('retrieveOutgoingOrdersCtrl', ['$scope', '$http', '$filter', '$window', 'apiService', '$location', 'gridOptions', 'uiGridConstants', '$rootScope', function ($scope, $http, $filter, $window, $apiService, $location, $gridOptions, uiGridConstants, $rootScope) {
+	$scope.ordenesSalida = [];
+	$scope.ordenSalida = {};
+  
+  $scope.configuraciones = $rootScope.configuraciones;
+	
+	// Initializing the object
+  	$scope.gridOptions = $gridOptions.getGridOptionsForOrdenesSalida();
+  
+  	$scope.gridOptions.onRegisterApi = function( gridApi ) {
+    	$scope.gridApi = gridApi;
+  	};
+  
+  	// Setting the API's
+  	$scope.gridOptions.appScopeProvider = {
+	  	onDblClick: function(row) {
+        	$location.path("/movimientos/ordenes-salida/" + row.entity.uuid);
+     	}
+  	}
+  
+  	$scope.gridOptions.rowTemplate = "<div ng-dblclick=\"grid.appScope.onDblClick(row)\" ng-repeat=\"(colRenderIndex, col) in colContainer.renderedColumns track by col.colDef.name\" class=\"ui-grid-cell\" ng-class=\"{ 'ui-grid-row-header-cell': col.isRowHeader }\" ui-grid-cell ></div>";
+
+	$scope.flags = {
+		isSearchingOrdenesSalida: false,
+		isSearchingOrdenSalida: false,
+		inErrorMessage: false,
+		inOrdenSalidaSearch: false
+	}
+	
+	$scope.flags.isSearchingOrdenesSalida = true;
+
+	$apiService.retrieveOrdenesSalida()
+	.then(function (response) {
+		$scope.flags.isSearchingOrdenesSalida = false;
+		$scope.ordenesSalida = response;
+		
+		$scope.gridOptions.data = $scope.ordenesSalida;
+	}, function (reason) {
+		$scope.flags.isSearchingOrdenesSalida = false;
+		
+		swal("Ha ocurrido un problema", "Hubo problemas al descargar las Ordenes de Salida", "error");
+	});
+  
+  	// Function to search an orden de pedido
+  	$scope.buscarOrdenSalida = function() {
+		$scope.flags.inOrdenSalidaSearch = true;
+		$scope.flags.isSearchingOrdenesSalida = true;
+
+		$apiService.getOrdenesSalidaByQuery($scope.ordenSalidaSearchParam) 
+		.then(function (response) {
+		  	$scope.flags.isSearchingOrdenesSalida = false;
+			$scope.ordenesSalida = response.response;
+		}, function (reason) {
+		 	$scope.flags.isSearchingOrdenesSalida = false;
+			$scope.flags.inOrdenSalidaSearch = false;
+			$scope.flags.inErrorMessage = true;
+			swal("Ha ocurrido un problema", "Hay unos problemas al buscar las ordenes de pedido", "error");
+		});
+  	};
+
+	$scope.getEntryOrder = (function (id_order) {
+		$apiService.getOrdenSalidaByUUID(id_order)
+		.then(function (response) {
+		  	$scope.ordenSalida = response.response;
+		}, function (reason) {
+		  	swal("Ha ocurrido un problema", "Hubo problemas al descargar la Orden de Salida", "error");
+		});
+	});
+
+}])
+
+.controller('verOrdenSalidaController', ['$scope', '$http', '$filter', '$window', 'apiService', '$location', '$route', function ($scope, $http, $filter, $window, $apiService, $location, $route) {
+	
+	var uuidOrdenSalida = $route.current.pathParams.uuid;
+	
+	$scope.ordenesSalida = [];
+	$scope.ordenSalida = {};
+
+	$apiService.getOrdenSalidaByUUID(uuidOrdenSalida)
+	.then(function (response) {
+		$scope.ordenSalida = response.response;
+		console.log ($scope.ordenSalida)
+	}, function (reason) {
+		swal("Ha ocurrido un problema", "Hubo problemas al descargar la Orden de Salida", "error");
+	});
+}]);
